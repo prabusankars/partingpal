@@ -22,16 +22,23 @@ def is_allowed_admin(email: str, hosted_domain: str | None = None) -> bool:
     return bool(s.allowed_domains) and (domain in s.allowed_domains or (hosted_domain or "").lower() in s.allowed_domains)
 
 
-def require_admin(authorization: str | None = Header(default=None)) -> str:
+def require_admin(
+    authorization: str | None = Header(default=None),
+    x_auth_token: str | None = Header(default=None),
+) -> str:
     """Verify a Google ID token from the HR dashboard and return the admin's email."""
     s = get_settings()
     if s.auth_disabled:
         return "dev@localhost"
     if not s.google_client_id:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Admin sign-in is not configured")
-    if not authorization or not authorization.lower().startswith("bearer "):
+    # The dashboard sends X-Auth-Token; a standard Bearer header works too.
+    if x_auth_token:
+        token = x_auth_token.strip()
+    elif authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    else:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sign in required")
-    token = authorization.split(" ", 1)[1].strip()
     try:
         claims = id_token.verify_oauth2_token(token, _google_request, s.google_client_id)
     except ValueError:

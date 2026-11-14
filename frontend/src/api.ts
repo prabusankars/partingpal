@@ -101,7 +101,8 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
   const headers = new Headers(init.headers);
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  // Not "Authorization": proxies such as Cloud Shell web preview claim that header for their own sign-in.
+  if (token) headers.set("X-Auth-Token", token);
   if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   let response: Response;
   try {
