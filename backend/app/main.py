@@ -28,7 +28,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Parting Pal API", lifespan=lifespan)
+app = FastAPI(title="Parting Pal API", lifespan=lifespan,redirect_slashes=False)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin],
