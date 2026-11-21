@@ -27,6 +27,11 @@ class Assessment:
     declined: bool = False
     wants_to_end: bool = False
     also_covered: list[str] = field(default_factory=list)
+    # Guardrail flags: a flagged reply is redirected by the engine and never reaches advance().
+    off_topic: bool = False
+    manipulation: bool = False
+    # Abusive replies still count as answers; the engine counts them and escalates to HR past the limit.
+    abusive: bool = False
 
 
 @dataclass(frozen=True)

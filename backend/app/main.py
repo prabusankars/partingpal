@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db import Base, SessionLocal
+from .interview.prompt_config import get_prompt_config
 from .routers import admin, interview
 
 settings = get_settings()
@@ -18,6 +19,8 @@ log = logging.getLogger("partingpal")
 async def lifespan(_: FastAPI):
     # Creates missing tables; switch to Alembic migrations once the schema starts changing.
     Base.metadata.create_all(SessionLocal.kw["bind"])
+    prompts = get_prompt_config()
+    log.info("Prompts version %s loaded (%d topics)", prompts.version, len(prompts.topics))
     if settings.auth_disabled:
         log.warning("AUTH_DISABLED is set: the HR dashboard is open to anyone. Use only for local development.")
     elif not (settings.allowed_emails or settings.allowed_domains):

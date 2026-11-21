@@ -7,13 +7,27 @@ from ..config import Settings
 from ..llm.base import ChatMessage, LLMError, LLMProvider, parse_json_object
 from ..models import Interview, Message, utcnow
 from .flow import Assessment, Directive, FlowState, Transition, advance
+from .guardrails import (
+    ABUSIVE_TAG,
+    MANIPULATION,
+    OFF_TOPIC,
+    abusive_count,
+    blocked_tag,
+    is_blocked,
+    leaks,
+    screen,
+    strikes,
+)
+from .prompt_config import get_prompt_config
 from .prompts import (
-    CLASSIFIER_USER,
     COMPLETION_MARKER,
-    KICKOFF_MESSAGE,
-    REPEAT_CORRECTION,
     classifier_system_prompt,
+    classifier_user_prompt,
+    first_name,
     interviewer_system_prompt,
+    kickoff_message,
+    leak_correction,
+    repeat_correction,
 )
 from .topics import TOPIC_BY_ID, TOPICS
 
@@ -81,7 +95,7 @@ class InterviewEngine:
         interview.started_at = utcnow()
         state = FlowState()
         save_state(interview, state)
-        interview.messages.append(Message(role="user", content=KICKOFF_MESSAGE, hidden=True))
+        interview.messages.append(Message(role="user", content=kickoff_message(), hidden=True))
         return self._reply(interview, state, Directive.OPEN)
 
     def respond(self, interview: Interview, text: str) -> Message:
@@ -89,9 +103,23 @@ class InterviewEngine:
             raise ValueError("Interview is not in progress")
         state = load_state(interview)
         question = self._last_assistant_text(interview)
-        interview.messages.append(Message(role="user", content=text))
 
-        assessment = self._assess(interview, state, question, text) if state.phase == "topics" else Assessment()
+        # Guardrails: obvious override attempts are caught without a model call; the classifier
+        # flags subtler off-topic or manipulative replies as part of its usual assessment.
+        violation = screen(text)
+        assessment = Assessment()
+        if violation is None and state.phase in ("topics", "wrap_up"):
+            assessment = self._assess(interview, state, question, text)
+            violation = MANIPULATION if assessment.manipulation else OFF_TOPIC if assessment.off_topic else None
+        if violation:
+            return self._block(interview, text, violation, question)
+
+        interview.messages.append(Message(role="user", content=text, topic=ABUSIVE_TAG if assessment.abusive else None))
+        if assessment.abusive:
+            log.warning("Abusive message in interview %s", interview.id)
+            if abusive_count(interview.messages) > get_prompt_config().guardrails.max_abusive_messages:
+                return self._escalate(interview, state)
+
         transition = advance(
             state,
             assessment,
@@ -111,9 +139,47 @@ class InterviewEngine:
 
     # Internals
 
+    def _block(self, interview: Interview, text: str, violation: str, question: str) -> Message:
+        """Answer a blocked message with a fixed redirect; end the interview after too many."""
+        rules = get_prompt_config().guardrails
+        interview.messages.append(Message(role="user", content=text, topic=blocked_tag(violation)))
+        log.warning("Guardrail blocked a message (%s) in interview %s", violation, interview.id)
+        name = first_name(interview.employee_name)
+        company = self.settings.company_name
+
+        if strikes(interview.messages) >= rules.max_strikes:
+            content = rules.end_message.strip().format(first_name=name, company=company)
+            message = Message(role="assistant", content=content, topic=blocked_tag("end"))
+            interview.messages.append(message)
+            save_state(interview, replace(load_state(interview), phase="done"))
+            self._mark_completed(interview, "guardrail_ended")
+            return message
+
+        template = rules.redirect_manipulation if violation == MANIPULATION else rules.redirect_off_topic
+        content = template.strip().format(first_name=name, company=company, question=_last_question(question))
+        message = Message(role="assistant", content=content, topic=blocked_tag("redirect"))
+        interview.messages.append(message)
+        return message
+
+    def _escalate(self, interview: Interview, state: FlowState) -> Message:
+        """End with a fixed message promising HR follow-up; the router emails the HR executive."""
+        rules = get_prompt_config().guardrails
+        content = rules.escalation_message.strip().format(
+            first_name=first_name(interview.employee_name), company=self.settings.company_name
+        )
+        message = Message(role="assistant", content=content, topic="escalated")
+        interview.messages.append(message)
+        save_state(interview, replace(state, phase="done", user_turns=state.user_turns + 1))
+        self._mark_completed(interview, "escalated_to_hr")
+        return message
+
     def _assess(self, interview: Interview, state: FlowState, question: str, answer: str) -> Assessment:
-        topic = TOPIC_BY_ID[state.current_topic] if state.current_topic else TOPICS[0]
-        prompt = CLASSIFIER_USER.format(topic_title=topic.title, topic_id=topic.id, question=question, answer=answer)
+        if state.phase == "wrap_up":
+            topic_title, topic_id = "Closing: anything else they want to add", "wrap_up"
+        else:
+            topic = TOPIC_BY_ID[state.current_topic] if state.current_topic else TOPICS[0]
+            topic_title, topic_id = topic.title, topic.id
+        prompt = classifier_user_prompt(topic_title=topic_title, topic_id=topic_id, question=question, answer=answer)
         try:
             raw = self.llm.complete(
                 interview.model,
@@ -133,6 +199,9 @@ class InterviewEngine:
             declined=bool(data.get("declined", False)),
             wants_to_end=bool(data.get("wants_to_end", False)),
             also_covered=[t for t in also if isinstance(t, str)] if isinstance(also, list) else [],
+            off_topic=bool(data.get("off_topic", False)),
+            manipulation=bool(data.get("manipulation", False)),
+            abusive=bool(data.get("abusive", False)),
         )
 
     def _reply(
@@ -147,13 +216,20 @@ class InterviewEngine:
         )
         # The full transcript comes from the database every turn, so the model's memory always
         # matches what the employee sees, across refreshes, restarts and server instances.
-        history = [ChatMessage(m.role, m.content) for m in interview.messages]
+        # Blocked messages and their redirects are left out, so the model never reads them.
+        history = [ChatMessage(m.role, m.content) for m in interview.messages if not is_blocked(m)]
         text, _ = strip_marker(self.llm.complete(interview.model, system, history))
 
-        previous = [m.content for m in interview.messages if m.role == "assistant"]
+        previous = [m.content for m in interview.messages if m.role == "assistant" and not is_blocked(m)]
         if directive in (Directive.ASK_TOPIC, Directive.FOLLOW_UP) and is_repeat(text, previous):
             log.info("Regenerating repeated question for interview %s", interview.id)
-            text, _ = strip_marker(self.llm.complete(interview.model, system + REPEAT_CORRECTION, history))
+            text, _ = strip_marker(self.llm.complete(interview.model, system + repeat_correction(), history))
+
+        if leaks(text):
+            log.warning("Regenerating a reply that quoted its instructions in interview %s", interview.id)
+            text, _ = strip_marker(self.llm.complete(interview.model, system + leak_correction(), history))
+            if leaks(text):
+                text = self._fallback(interview, state, directive)
 
         tag = state.current_topic if directive in (Directive.OPEN, Directive.ASK_TOPIC, Directive.FOLLOW_UP) else directive.value
         message = Message(role="assistant", content=text, topic=tag)
@@ -165,6 +241,17 @@ class InterviewEngine:
             self._mark_completed(interview, transition.completion_reason if transition else "completed")
         return message
 
+    def _fallback(self, interview: Interview, state: FlowState, directive: Directive) -> str:
+        fallback = get_prompt_config().guardrails.fallback
+        template = {Directive.WRAP_UP: fallback.wrap_up, Directive.CLOSE: fallback.close}.get(directive, fallback.topic)
+        topic = TOPIC_BY_ID.get(state.current_topic or "")
+        return template.strip().format(
+            first_name=first_name(interview.employee_name),
+            company=self.settings.company_name,
+            topic_title=topic.title if topic else "",
+            topic_goal=topic.goal if topic else "",
+        )
+
     @staticmethod
     def _mark_completed(interview: Interview, reason: str) -> None:
         interview.status = "completed"
@@ -174,6 +261,6 @@ class InterviewEngine:
     @staticmethod
     def _last_assistant_text(interview: Interview) -> str:
         for message in reversed(interview.messages):
-            if message.role == "assistant":
+            if message.role == "assistant" and not is_blocked(message):
                 return message.content
         return ""

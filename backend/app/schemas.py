@@ -25,6 +25,11 @@ class InterviewCreate(BaseModel):
     send_email: bool = True
 
 
+class ModelChange(BaseModel):
+    provider: str = Field(min_length=1, max_length=32)
+    model: str | None = Field(default=None, max_length=128)  # provider's default when omitted
+
+
 class MessageOut(BaseModel):
     id: int
     role: str

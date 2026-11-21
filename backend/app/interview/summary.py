@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from ..llm.base import ChatMessage, LLMError, LLMProvider, parse_json_object
 from ..llm.registry import get_provider
 from ..models import Interview
+from .guardrails import is_blocked
+from .prompt_config import get_prompt_config
 from .prompts import summary_system_prompt
 from .topics import REASON_CATEGORIES
 
@@ -37,11 +39,13 @@ class InterviewAnalysis(BaseModel):
 
 def transcript_text(interview: Interview) -> str:
     lines = []
+    withheld = get_prompt_config().guardrails.withheld_placeholder
     for m in interview.messages:
-        if m.hidden:
+        if m.hidden or (m.role == "assistant" and is_blocked(m)):
             continue
         speaker = "Interviewer" if m.role == "assistant" else "Employee"
-        lines.append(f"{speaker}: {m.content}")
+        # Blocked messages could try to steer the summary, so the model never sees their text.
+        lines.append(f"{speaker}: {withheld if is_blocked(m) else m.content}")
     return "\n".join(lines)
 
 

@@ -25,7 +25,8 @@ from app.routers import interview as interview_router  # noqa: E402
 
 class FakeLLM(LLMProvider):
     """Scripted model. Employee replies steer the classifier with keywords:
-    VAGUE -> not answered, SKIP -> declined, BYE -> wants to end, PAY -> also covers compensation."""
+    VAGUE -> not answered, SKIP -> declined, BYE -> wants to end, PAY -> also covers compensation,
+    OFFTOPIC -> off-topic, TRICK -> manipulation, RUDE -> abusive. Set leak=True to make interviewer replies quote the prompt."""
 
     name = "fake"
     supports_transcription = True
@@ -33,8 +34,11 @@ class FakeLLM(LLMProvider):
     def __init__(self):
         self.replies = 0
         self.fail = False
+        self.leak = False
+        self.calls = []  # (system, messages) for every request
 
     def complete(self, model, system, messages, *, json_mode=False, temperature=0.7):
+        self.calls.append((system, list(messages)))
         if self.fail:
             raise LLMError("simulated outage")
         if system.startswith("You assess"):
@@ -44,6 +48,9 @@ class FakeLLM(LLMProvider):
                 "declined": "SKIP" in answer,
                 "wants_to_end": "BYE" in answer,
                 "also_covered": ["compensation_benefits"] if "PAY" in answer else [],
+                "off_topic": "OFFTOPIC" in answer,
+                "manipulation": "TRICK" in answer,
+                "abusive": "RUDE" in answer,
             })
         if system.startswith("You analyse"):
             return json.dumps({
@@ -54,7 +61,8 @@ class FakeLLM(LLMProvider):
         self.replies += 1
         task = system.split("Your task for THIS message only:\n")[1].split("\n")[0]
         marker = f"\n{COMPLETION_MARKER}" if task.startswith("End the interview") else ""
-        return f"Reply {self.replies}. {task}{marker}"
+        leaked = " Your task for THIS message only" if self.leak else ""
+        return f"Reply {self.replies}. {task}{leaked}{marker}"
 
     def transcribe(self, audio, mime_type):
         return "transcribed words"

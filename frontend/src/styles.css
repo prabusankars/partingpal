@@ -100,6 +100,9 @@ button.link { border: 0; padding: 0; background: none; color: var(--accent); }
 .section-head .search { max-width: 260px; }
 .section-head select { width: auto; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.model-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.model-edit select { width: auto; max-width: 100%; min-width: 0; padding: 5px 8px; }
+.model-edit .muted { flex-basis: 100%; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
 .grid-2 > .card { margin-bottom: 0; }
 .grid-2 { margin-bottom: 16px; }

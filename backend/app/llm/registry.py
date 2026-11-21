@@ -42,16 +42,24 @@ def get_provider(provider: str) -> LLMProvider:
         from .openai_compat import OpenAICompatibleProvider
 
         return OpenAICompatibleProvider(
-            "openai", s.openai_api_key, transcription_model=s.openai_transcription_model, send_temperature=False
+            "openai",
+            s.openai_api_key,
+            transcription_model=s.openai_transcription_model,
+            send_temperature=False,
+            timeout_seconds=s.llm_timeout_seconds,
         )
     if provider == "gemini":
         from .gemini import GeminiProvider
 
-        return GeminiProvider(s.gemini_api_key)
+        return GeminiProvider(
+            s.gemini_api_key,
+            transcription_model=s.gemini_transcription_model or s.models_for("gemini")[0],
+            timeout_seconds=s.llm_timeout_seconds,
+        )
     if provider == "oss":
         from .openai_compat import OpenAICompatibleProvider
 
-        return OpenAICompatibleProvider("oss", s.oss_api_key, base_url=s.oss_base_url)
+        return OpenAICompatibleProvider("oss", s.oss_api_key, base_url=s.oss_base_url, timeout_seconds=s.llm_timeout_seconds)
     raise LLMError(f"Unknown provider '{provider}'")
 
 

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db, get_session_factory
+from ..emailer import send_escalation
 from ..interview.engine import InterviewEngine
 from ..interview.summary import summarise_in_background
 from ..llm.base import LLMError
@@ -107,6 +108,14 @@ def send_message(
     _run(db, interview, lambda: engine.respond(interview, text))
     if interview.status == "completed":
         background.add_task(summarise_in_background, interview.id, session_factory)
+        if interview.completion_reason == "escalated_to_hr":
+            background.add_task(
+                send_escalation,
+                s.hr_escalation_email or interview.created_by,
+                interview.employee_name,
+                interview.department,
+                f"{s.public_base_url.rstrip('/')}/admin/interviews/{interview.id}",
+            )
     return _state(interview, just_finished=True)
 
 

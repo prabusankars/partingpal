@@ -36,7 +36,7 @@ class Interview(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    # completed | employee_ended | turn_limit | ended_early
+    # completed | employee_ended | turn_limit | ended_early | guardrail_ended | escalated_to_hr
     completion_reason: Mapped[str | None] = mapped_column(String(32))
 
     # Conversation flow state, persisted so any server instance can continue the interview.
@@ -72,6 +72,8 @@ class Message(Base):
     # Kick-off message sent to the model on the employee's behalf; never shown in the UI.
     hidden: Mapped[bool] = mapped_column(Boolean, default=False)
     # Topic the assistant message was asking about, or the directive (wrap_up/close).
+    # "guardrail:<reason>" marks a blocked employee message and the redirect that answered it;
+    # "flag:abusive" marks an abusive employee message (still part of the conversation).
     topic: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

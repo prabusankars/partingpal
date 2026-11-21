@@ -157,6 +157,8 @@ export function adminApi(token: string) {
     get: (id: number) => request<InterviewDetail>(`/api/admin/interviews/${id}`, {}, token),
     summarize: (id: number) => request<InterviewSummary>(`/api/admin/interviews/${id}/summarize`, { method: "POST" }, token),
     extend: (id: number) => request<InterviewSummary>(`/api/admin/interviews/${id}/extend`, { method: "POST" }, token),
+    changeModel: (id: number, choice: { provider: string; model: string }) =>
+      request<InterviewSummary>(`/api/admin/interviews/${id}/model`, { method: "PATCH", body: JSON.stringify(choice) }, token),
     remove: (id: number) => request<void>(`/api/admin/interviews/${id}`, { method: "DELETE" }, token),
     report: () => request<Report>("/api/admin/reports", {}, token),
     exportCsv: () => request<Blob>("/api/admin/reports/export.csv", {}, token),

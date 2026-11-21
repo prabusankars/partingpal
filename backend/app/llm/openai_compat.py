@@ -15,9 +15,10 @@ class OpenAICompatibleProvider(LLMProvider):
         base_url: str | None = None,
         transcription_model: str | None = None,
         send_temperature: bool = True,
+        timeout_seconds: int = 45,
     ):
         self.name = name
-        self.client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=90, max_retries=2)
+        self.client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=timeout_seconds, max_retries=2)
         self.transcription_model = transcription_model
         self.supports_transcription = transcription_model is not None
         # OpenAI reasoning models reject non-default temperatures, so it is only sent to self-hosted models.

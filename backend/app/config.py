@@ -23,13 +23,17 @@ class Settings(BaseSettings):
     openai_models: str = "gpt-4.1-mini,gpt-4.1"
     openai_transcription_model: str = "whisper-1"
     gemini_api_key: str | None = None
-    gemini_models: str = "gemini-2.5-flash,gemini-2.5-pro"
+    gemini_models: str = "gemini-3.8-flash,gemini-3.5-flash"
+    # Voice input model; defaults to the first of GEMINI_MODELS
+    gemini_transcription_model: str | None = None
     # Any OpenAI-compatible server: Ollama (http://localhost:11434/v1), vLLM, LM Studio, DashScope...
     oss_base_url: str | None = None
     oss_api_key: str = "not-needed"
     oss_models: str = "qwen2.5:7b-instruct"
     # openai | gemini; when unset the first configured one is used
     transcription_provider: str | None = None
+    # Per request. A turn can make up to four model calls, so keep this well under the proxy's 180 s.
+    llm_timeout_seconds: int = 45
 
     # Interview flow
     max_user_turns: int = 20
@@ -37,6 +41,8 @@ class Settings(BaseSettings):
     max_message_chars: int = 4000
     max_audio_bytes: int = 10_000_000
     link_valid_days: int = 14
+    # Prompts, topics and guardrails; defaults to app/interview/prompts.toml
+    prompts_file: str | None = None
 
     # Admin (HR) authentication
     google_client_id: str | None = None
@@ -50,6 +56,8 @@ class Settings(BaseSettings):
     smtp_user: str | None = None
     smtp_password: str | None = None
     smtp_from: str | None = None
+    # Who is emailed when an interview is escalated (abusive replies). Defaults to the HR user who created it.
+    hr_escalation_email: str | None = None
 
     @property
     def allowed_emails(self) -> set[str]:

@@ -97,3 +97,23 @@ def test_admin_allowlist_fails_closed(monkeypatch):
     monkeypatch.setattr(settings, "admin_allowed_domains", "acme.com")
     assert is_allowed_admin("HR@acme.com")
     assert not is_allowed_admin("someone@gmail.com")
+
+
+def test_admin_can_switch_model_mid_interview(client, token, llm, monkeypatch):
+    monkeypatch.setattr(get_settings(), "gemini_models", "model-a,model-b")
+    client.post(f"/api/interview/{token}/start")
+    interview_id = client.get("/api/admin/interviews").json()[0]["id"]
+    models = get_settings().models_for("gemini")
+
+    changed = client.patch(f"/api/admin/interviews/{interview_id}/model", json={"provider": "gemini", "model": models[1]})
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["model"] == models[1]
+
+    client.post(f"/api/interview/{token}/messages", json={"text": "A detailed answer."})
+    with SessionLocal() as db:
+        assert db.query(Interview).one().model == models[1]
+
+    # Only enabled, configured models are accepted.
+    assert client.patch(f"/api/admin/interviews/{interview_id}/model", json={"provider": "gemini", "model": "made-up"}).status_code == 422
+    assert client.patch(f"/api/admin/interviews/{interview_id}/model", json={"provider": "nope"}).status_code == 422
+    assert client.patch("/api/admin/interviews/9999/model", json={"provider": "gemini"}).status_code == 404

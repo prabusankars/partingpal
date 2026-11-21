@@ -2,6 +2,7 @@
 
 import csv
 import io
+import logging
 from collections import Counter, defaultdict
 from datetime import timedelta
 
@@ -24,10 +25,13 @@ from ..schemas import (
     InterviewCreated,
     InterviewDetailOut,
     InterviewSummaryOut,
+    ModelChange,
     ProvidersOut,
     ReportOut,
 )
 from .common import interview_link, summary_out, topic_progress, visible_messages
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -110,6 +114,25 @@ def regenerate_summary(interview_id: int, db: Session = Depends(get_db)):
     if interview.status != "completed":
         raise HTTPException(status.HTTP_409_CONFLICT, "Only completed interviews can be summarised")
     summarise_interview(db, interview)
+    return summary_out(interview)
+
+
+@router.patch("/interviews/{interview_id}/model", response_model=InterviewSummaryOut)
+def change_model(interview_id: int, body: ModelChange, db: Session = Depends(get_db), admin: str = Depends(require_admin)):
+    """Switch the model, for example when a provider is overloaded. Takes effect from the next model call:
+    the employee's next message, or the next summary regeneration for a completed interview."""
+    interview = _get(db, interview_id)
+    try:
+        provider, model = resolve_model(body.provider, body.model)
+    except LLMError as exc:
+        raise HTTPException(422, str(exc))
+    if (provider, model) != (interview.provider, interview.model):
+        log.info(
+            "Interview %s model changed by %s: %s/%s -> %s/%s",
+            interview.id, admin, interview.provider, interview.model, provider, model,
+        )
+        interview.provider, interview.model = provider, model
+        db.commit()
     return summary_out(interview)
 
 
